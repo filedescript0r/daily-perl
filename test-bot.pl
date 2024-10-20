@@ -1,26 +1,48 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
 use strict;
 use warnings;
-use Mojolicious::Lite;
+use HTTP::Daemon;
+use HTTP::Status;
 use LWP::UserAgent;
 use JSON;
 
-my $token = '7728524---:AAGteRdyPf2sQ7pK3z0LOKHpPwfDbOhAZMs';
+my $token = '7728524419:AAGteRdyPf2sQ7pK3z0LOKHpPwfDbOhAZMs';
 my $url = "https://api.telegram.org/bot$token";
 
-# Установите вебхук
-sub set_webhook {
-    my $webhook_url = 'vm3221814.stark-industries.solutions/webhook'; # Замените на ваш URL
-    my $ua = LWP::UserAgent->new;
-    my $response = $ua->get("$url/setWebhook?url=$webhook_url");
-    return $response->decoded_content;
+# Создаем HTTP-сервер
+my $d = HTTP::Daemon->new(
+    LocalAddr => '0.0.0.0',  # Слушаем на всех интерфейсах
+    LocalPort => 8080,        # Порт, на котором будет работать сервер
+    Reuse => 1,
+) or die "Failed to create HTTP daemon: $!";
+
+print "Server is running at: <URL>\n";
+
+# Устанавливаем вебхук
+set_webhook();
+
+while (my $c = $d->accept()) {
+    while (my $r = $c->get_request()) {
+        if ($r->method eq 'POST' && $r->uri->path eq '/webhook') {
+            my $update = decode_json($r->content);
+            handle_update($update);
+            $c->send_response(HTTP::Response->new(RC_OK));
+        } else {
+            $c->send_error(RC_NOT_FOUND);
+        }
+    }
+    $c->close;
+    undef($c);
 }
 
-# Обработка обновлений
-post '/webhook' => sub {
-    my $c = shift;
-    my $update = $c->req->json;
+sub set_webhook {
+    my $webhook_url = 'http://yourdomain.com:8080/webhook'; # Замените на ваш URL
+    my $ua = LWP::UserAgent->new;
+    $ua->get("$url/setWebhook?url=$webhook_url");
+}
 
+sub handle_update {
+    my ($update) = @_;
     if (my $message = $update->{message}) {
         my $chat_id = $message->{chat}->{id};
         my $text = $message->{text};
@@ -29,22 +51,13 @@ post '/webhook' => sub {
             send_message($chat_id, 'Привет! Я ваш бот.');
         }
     }
+}
 
-    return $c->render(json => { status => 'ok' });
-};
-
-# Функция отправки сообщения
 sub send_message {
     my ($chat_id, $text) = @_;
     my $ua = LWP::UserAgent->new;
-    my $response = $ua->post("$url/sendMessage", {
+    $ua->post("$url/sendMessage", {
         chat_id => $chat_id,
         text    => $text,
     });
-    return $response->decoded_content;
 }
-
-# Установите вебхук при запуске
-set_webhook();
-
-app->start;
