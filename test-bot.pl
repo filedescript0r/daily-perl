@@ -1,63 +1,51 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
-use HTTP::Daemon;
-use HTTP::Status;
-use LWP::UserAgent;
-use JSON;
+use IO::Socket::INET;
 
+# Ваш токен
 my $token = '7728524419:AAGteRdyPf2sQ7pK3z0LOKHpPwfDbOhAZMs';
-my $url = "https://api.telegram.org/bot$token";
+# URL для API Telegram
+my $url = "https://api.telegram.org/bot$token/";
+# Настройка вебхука
+my $server_ip = '171.22.124.111';
+my $port = 80; # или 443 для HTTPS
 
-# Создаем HTTP-сервер
-my $d = HTTP::Daemon->new(
-    LocalAddr => '0.0.0.0',  # Слушаем на всех интерфейсах
-    LocalPort => 8080,        # Порт, на котором будет работать сервер
-    Reuse => 1,
-) or die "Failed to create HTTP daemon: $!";
+# Создание сокета
+my $socket = IO::Socket::INET->new(
+    LocalAddr => $server_ip,
+    LocalPort => $port,
+    Proto     => 'tcp',
+    Listen    => SOMAXCONN,
+    Reuse     => 1
+) or die "Не удалось создать сокет: $!";
 
-print "Server is running at: <URL>\n";
+print "Сервер запущен на $server_ip:$port\n";
 
-# Устанавливаем вебхук
-set_webhook();
-
-while (my $c = $d->accept()) {
-    while (my $r = $c->get_request()) {
-        if ($r->method eq 'POST' && $r->uri->path eq '/webhook') {
-            my $update = decode_json($r->content);
-            handle_update($update);
-            $c->send_response(HTTP::Response->new(RC_OK));
-        } else {
-            $c->send_error(RC_NOT_FOUND);
-        }
+while (my $client = $socket->accept()) {
+    my $request = '';
+    $client->recv($request, 1024);
+    
+    if ($request =~ m{POST /webhook}g) {
+        # Обработка входящего сообщения
+        my ($update) = $request =~ /Content-Length: (\d+)/;
+        my $json = '';
+        $client->recv($json, $update);
+        
+        # Здесь вы можете обработать $json и отправить ответ
+        print "Получено сообщение: $json\n";
+        
+        # Пример отправки сообщения обратно в Telegram
+        my $chat_id = 'YOUR_CHAT_ID'; # Замените на ваш chat_id
+        my $message = "Hello from Perl bot!";
+        my $send_message_url = "${url}sendMessage?chat_id=$chat_id&text=$message";
+        
+        # Отправка сообщения
+        my $response = `curl -s "$send_message_url"`;
+        print "Ответ от Telegram: $response\n";
     }
-    $c->close;
-    undef($c);
+    
+    close($client);
 }
 
-sub set_webhook {
-    my $webhook_url = 'http://yourdomain.com:8080/webhook'; # Замените на ваш URL
-    my $ua = LWP::UserAgent->new;
-    $ua->get("$url/setWebhook?url=$webhook_url");
-}
-
-sub handle_update {
-    my ($update) = @_;
-    if (my $message = $update->{message}) {
-        my $chat_id = $message->{chat}->{id};
-        my $text = $message->{text};
-
-        if ($text eq '/start') {
-            send_message($chat_id, 'Привет! Я ваш бот.');
-        }
-    }
-}
-
-sub send_message {
-    my ($chat_id, $text) = @_;
-    my $ua = LWP::UserAgent->new;
-    $ua->post("$url/sendMessage", {
-        chat_id => $chat_id,
-        text    => $text,
-    });
-}
+close($socket);
